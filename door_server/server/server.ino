@@ -3,13 +3,21 @@
 #include <Servo.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <ESP8266HTTPClient.h>
 #include <SPI.h>
 #include <Ethernet.h>
 #include <SoftwareSerial.h>
+#include <WiFiClient.h>
+#include <ArduinoJson.h>
 
 // 와이파이명
 const char* ssid = constant_ssid;
 const char* password = constant_password;
+
+// RestAPI - Spring 서버로 전송
+String doorUrl = "(doorUrl)";
+String lightUrl = "(lightUrl)";
+
 
 WiFiServer server(constant_port);
 
@@ -23,8 +31,8 @@ int isDoorOpen = 0; // 1 - 열림, 0 - 닫힘
 int lightState = 0; // 1 - 켜짐, 1 - 꺼짐
 
 /*
-가끔식 비정확한 값이 수신되기 때문에,
-3번 이상 닫힘/열림 동일한 값이 들어와야 문 상태를 업데이트 하도록 바꿈
+  가끔식 비정확한 값이 수신되기 때문에,
+  3번 이상 닫힘/열림 동일한 값이 들어와야 문 상태를 업데이트 하도록 바꿈
 */
 int prevState = 0;
 int openCnt = 0;
@@ -70,6 +78,7 @@ void loop() {
     } else if(command == '0') {
       lightOff();
     }
+    sendLightStateUsingRestAPI();
   } else {
     WiFiClient client = server.available();
     int newState = -1;
@@ -109,10 +118,14 @@ void loop() {
     if(openCnt == consecutive_standard && isDoorOpen == 0) {
       lightOn();
       isDoorOpen = 1;
+      sendDoorStateUsingRestAPI();
+      sendLightStateUsingRestAPI();
     } else if(closeCnt == consecutive_standard && isDoorOpen == 1) {
       // 만약 세 번 이상 연속으로 문 닫힘 신호가 오고, 문이 열려있다면
       lightOff();
       isDoorOpen = 0;
+      sendDoorStateUsingRestAPI();
+      sendLightStateUsingRestAPI();
     }
 
     // if(newState != -1 && isDoorOpen != newState) {
@@ -135,15 +148,90 @@ void loop() {
   }
 }
 
+void sendLightStateUsingRestAPI() {
+  Serial.println("Send Light State Using RestAPI to Spirng Server");
 
-void doorStateChange() {
+  if((WiFi.status() == WL_CONNECTED)) {
+    WiFiClient wifiClient;
+    HTTPClient httpClient;
 
+    httpClient.begin(wifiClient, lightUrl);
+    // 헤더 추가
+    httpClient.addHeader("Content-Type", "application/json");
+
+
+    // JSON 오브젝트
+    StaticJsonDocument<200> json;
+    json["isLightOn"] = lightState;
+
+    String parsedJsonToString;
+    // json을 String으로 변환
+    serializeJson(json, parsedJsonToString);
+
+    // POST 요청 보내기
+    int httpResponseCode = httpClient.POST(parsedJsonToString);
+ 
+    // HTTP 응답이 왔다면
+    if (httpResponseCode > 0) {
+      Serial.print("HTTP Response code: ");
+      Serial.println(httpResponseCode);
+
+      String response = httpClient.getString(); // 응답 본문을 문자열로 읽어옴
+      Serial.println(response); // 시리얼 모니터에 출력
+    }
+    else {
+      Serial.print("Error code: ");
+      Serial.println(httpResponseCode);
+    }
+
+    httpClient.end();
+  }
+}
+
+
+void sendDoorStateUsingRestAPI() {
+  Serial.println("Send Door State Using RestAPI to Spirng Server");
+  if((WiFi.status() == WL_CONNECTED)) {
+    WiFiClient wifiClient;
+    HTTPClient httpClient;
+
+    httpClient.begin(wifiClient, doorUrl);
+    // 헤더 추가
+    httpClient.addHeader("Content-Type", "application/json");
+
+
+    // JSON 오브젝트
+    StaticJsonDocument<200> json;
+    json["isDoorOpen"] = isDoorOpen;
+
+    String parsedJsonToString;
+    // json을 String으로 변환
+    serializeJson(json, parsedJsonToString);
+
+    // POST 요청 보내기
+    int httpResponseCode = httpClient.POST(parsedJsonToString);
+ 
+    // HTTP 응답이 왔다면
+    if (httpResponseCode > 0) {
+      Serial.print("HTTP Response code: ");
+      Serial.println(httpResponseCode);
+
+      String response = httpClient.getString(); // 응답 본문을 문자열로 읽어옴
+      Serial.println(response); // 시리얼 모니터에 출력
+    }
+    else {
+      Serial.print("Error code: ");
+      Serial.println(httpResponseCode);
+    }
+
+    httpClient.end();
+  }
 }
 
 
 void lightOn() {
   servo.write(0);
-  delay(1200);
+  delay(1100);
   servo.write(90);
   Serial.println("Point1");
 
@@ -153,7 +241,7 @@ void lightOn() {
 
 void lightOff() {
   servo.write(170);
-  delay(1200);
+  delay(1100);
   servo.write(90);
   Serial.println("Point2");
 
